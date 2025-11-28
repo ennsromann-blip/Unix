@@ -1,135 +1,85 @@
 #!/bin/sh
 
 if [ "$#" -ne 1 ]; then
-    echo "Error: There must be only 1 argument in $0" >&2
+    echo "Error: There must me only 1 argument $0" >&2
     exit 1
 fi
 
 SOURCE_FILE="$1"
-
 if [ ! -f "$SOURCE_FILE" ]; then
     echo "Error: File '$SOURCE_FILE' does not exist" >&2
     exit 2
 fi
 
-SOURCE_DIR=$(dirname "$SOURCE_FILE")
-SOURCE_DIR=$(cd "$SOURCE_DIR" && pwd) || {
-    echo "Error: Cannot resolve source directory" >&2
-    exit 3
-}
-
-TEMP_DIR=$(mktemp -d) || {
+SOURCE_DIR=$(pwd)
+TEMP_DIR=$(mktemp -d)
+if [ $? -ne 0 ]; then
     echo "Error: Failed to create temp directory" >&2
-    exit 4
-}
+    exit 3
+fi
 
-cleanup() {
+clean_tempdir() {
     rm -rf "$TEMP_DIR"
     exit "$1"
 }
+trap 'clean_tempdir $?' EXIT
+trap 'clean_tempdir 130' INT
+trap 'clean_tempdir 143' TERM
 
-trap 'cleanup $?' EXIT
 
-case "$SOURCE_FILE" in
-    *.c|*.cpp|*.cc|*.cxx)
-        OUTPUT=$(awk '
-            /^[[:space:]]*\/\// {
-                if (match($0, /Output:[[:space:]]+([^[:space:]]+)/, m)) {
-                    print m[1]
-                    exit
-                }
-            }
-        ' "$SOURCE_FILE")
-        OUTPUT=$(awk '
-            /^[[:space:]]*\/\// && /Output:[[:space:]]/ {
-                line = $0
-                sub(/.*Output:[[:space:]]+/, "", line)
-                if (line ~ /^[^[:space:]]+/) {
-                    sub(/[[:space:]].*$/, "", line)
-                    print line
-                    exit
-                }
-            }
-        ' "$SOURCE_FILE")
-        ;;
-    *.tex)
-        OUTPUT=$(awk '
-            /^[[:space:]]*%/ && /Output:[[:space:]]/ {
-                line = $0
-                sub(/.*Output:[[:space:]]+/, "", line)
-                if (line ~ /^[^[:space:]]+/) {
-                    sub(/[[:space:]].*$/, "", line)
-                    print line
-                    exit
-                }
-            }
-        ' "$SOURCE_FILE")
-        ;;
-    *)
-        echo "Error: Unsupported file type" >&2
-        cleanup 5
-        ;;
-esac
+OUTPUT=$(grep 'Output:' "$SOURCE_FILE" | sed 's/.*Output:\s*//' | tr -d '[:space:]')
 
 if [ -z "$OUTPUT" ]; then
-    echo "Error: No 'Output:' comment found in '$SOURCE_FILE'" >&2
-    cleanup 6
+    echo "Error: No output filename specified with Output:" >&2
+    clean_tempdir 4
 fi
 
-cp "$SOURCE_FILE" "$TEMP_DIR/" || {
-    echo "Error: Failed to copy source file" >&2
-    cleanup 7
-}
+
+SOURCE_NAME=$(basename "$SOURCE_FILE")
+
+cp "$SOURCE_FILE" "$TEMP_DIR/"
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to copy '$SOURCE_FILE' to temp directory." >&2
+    clean_tempdir 5
+fi
 
 cd "$TEMP_DIR" || {
-    echo "Error: Failed to enter temp directory" >&2
-    cleanup 8
+    echo "Error: Failed to move temp dir" >&2
+    clean_tempdir 6
 }
 
-SOURCE_BASE=$(basename "$SOURCE_FILE")
-
-# Сборка
 case "$SOURCE_FILE" in
     *.c)
-        cc -o "$OUTPUT" "$SOURCE_BASE" 2>/dev/null || {
-            echo "Error: C compilation failed" >&2
-            cleanup 9
-        }
-        ;;
-    *.cpp|*.cc|*.cxx)
-        c++ -o "$OUTPUT" "$SOURCE_BASE" 2>/dev/null || {
-            echo "Error: C++ compilation failed" >&2
-            cleanup 10
-        }
+        cc "$SOURCE_NAME" -o "$OUTPUT" 2>/tmp/err$$
+        if [ $? -ne 0 ]; then
+            cat /tmp/err$$ >&2
+            rm -f /tmp/err$$
+            clean_tempdir 7
+        fi
+        rm -f /tmp/err$$
         ;;
     *.tex)
-        if ! command -v pdflatex >/dev/null; then
-            echo "Error: pdflatex not found" >&2
-            cleanup 11
+        pdflatex "$SOURCE_NAME" >/dev/null 2>/tmp/err$$
+        if [ $? -ne 0 ]; then
+            cat /tmp/err$$ >&2
+            rm -f /tmp/err$$
+            clean_tempdir 8
         fi
-        pdflatex -interaction=nonstopmode "$SOURCE_BASE" >/dev/null 2>/dev/null || {
-            echo "Error: TeX build failed" >&2
-            cleanup 12
-        }
-        if [ "$OUTPUT" != "${SOURCE_BASE%.tex}.pdf" ]; then
-            mv "${SOURCE_BASE%.tex}.pdf" "$OUTPUT" || {
-                echo "Error: Failed to rename PDF" >&2
-                cleanup 13
-            }
-        fi
+
+        mv "${SOURCE_NAME%.tex}.pdf" "$OUTPUT"
+        rm -f /tmp/err$$
         ;;
 esac
 
 
-if [ ! -f "$OUTPUT" ]; then
-    echo "Error: Output file '$OUTPUT' was not produced" >&2
-    cleanup 14
+if [ -f "$OUTPUT" ]; then
+    echo "Output file created: $OUTPUT" >&2
+else
+    clean_tempdir 9
 fi
 
-cp "$OUTPUT" "$SOURCE_DIR/" || {
-    echo "Error: Failed to copy output to source directory" >&2
-    cleanup 15
+mv "$OUTPUT" "$SOURCE_DIR/" || {
+    clean_tempdir 10
 }
 
-
-cleanup 0
+clean_tempdir 0
