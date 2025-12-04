@@ -1,0 +1,10 @@
+services:
+  worker:
+    build:
+      context: .
+    volumes:
+      - shared_data:/app/shared_volume
+    restart: unless-stopped
+
+volumes:
+  shared_data:
