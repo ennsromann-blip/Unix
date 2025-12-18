@@ -15,7 +15,6 @@ MODULE_DESCRIPTION("TSU Kernel Module: Gagarin Mirror Date");
 static struct proc_dir_entry *out_proc_file = NULL;
 
 // Старт Ю.А. Гагарина: 12 апреля 1961 г., 06:07:00 UTC
-// Unix timestamp: -283993980 секунд
 static const time64_t GAGARIN_TIMESTAMP = -283993980LL;
 
 static void calculate_mirror_date(char *buffer, size_t max_len)
